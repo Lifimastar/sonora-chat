@@ -28,6 +28,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str
     user_id: Optional[str] = None
+    camera_image: Optional[str] = None  # Imagen base64 de la cámara
 
 # Definir las tools para el LLM (mismas que en bot.py)
 TOOLS = [
@@ -100,6 +101,14 @@ TOOLS = [
                 "required": ["key"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_camara",
+            "description": "Captura y analiza lo que ve la cámara del usuario. Úsala cuando te pregunten qué ves, qué tienes enfrente, o cualquier pregunta visual.",
+            "parameters": {"type": "object", "properties": {}}
+        }
     }
 ]
 
@@ -134,6 +143,10 @@ def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, u
             key = arguments.get("key")
             success = db_service.delete_memory(key, user_id=user_id)
             return {"success": success, "mensaje": f"Dato '{key}' borrado."}
+        
+        elif tool_name == "ver_camara":
+            # Se maneja de forma especial en el endpoint
+            return {"success": True, "use_camera": True}
         
         else:
             return {"success": False, "error": f"Tool '{tool_name}' no implementada"}
@@ -208,23 +221,52 @@ NOTA: Estás respondiendo en modo TEXTO (no voz).
             # Agregar mensaje del asistente con tool calls
             messages.append(assistant_message.model_dump())
             
+            use_camera_model = False  # Flag para usar el modelo con visión
+            
             for tool_call in assistant_message.tool_calls:
                 tool_name = tool_call.function.name
                 arguments = json.loads(tool_call.function.arguments)
                 
                 logger.info(f"🔧 Ejecutando tool: {tool_name}")
-                result = execute_tool(tool_name, arguments, db_service, request.user_id)
                 
-                # Agregar resultado de la tool
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result)
-                })
+                # Manejo especial de ver_camara
+                if tool_name == "ver_camara":
+                    if request.camera_image:
+                        logger.info("📷 Inyectando imagen de cámara al contexto")
+                        # Agregar resultado exitoso
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"success": True, "mensaje": "Imagen capturada. Analízala y describe lo que ves."})
+                        })
+                        # Agregar la imagen como mensaje de usuario
+                        messages.append({
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Esta es la imagen de mi cámara. Descríbela detalladamente."},
+                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{request.camera_image}"}}
+                            ]
+                        })
+                        use_camera_model = True
+                    else:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"success": False, "mensaje": "No hay imagen de cámara disponible. Asegúrate de que tu cámara esté encendida."})
+                        })
+                else:
+                    result = execute_tool(tool_name, arguments, db_service, request.user_id)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": json.dumps(result)
+                    })
             
             # Segunda llamada para obtener respuesta final
+            # Usar gpt-4o si hay imagen, sino gpt-4o-mini
+            model = "gpt-4o" if use_camera_model else "gpt-4o-mini"
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model,
                 messages=messages,
                 stream=True
             )
