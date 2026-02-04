@@ -73,23 +73,33 @@ class DatabaseService:
             formatted_history = []
             if response.data:
                 for msg in response.data:
-                    # Si tiene imagenes, formatear como multimodal (si el LLM lo soporta asi en historial)
-                    # OJO: Para simplificar y compatibilidad, si hay imagenes, las agregamos al contenido o las manejamos
-                    # Por ahora el historial simple de texto es lo mas seguro para contexto rapido, pero
-                    # si queremos que el bot 'vea' el pasado, idealmente deberiamos reconstruir el bloque de imagen.
-                    # Por simplicidad en V1: Solo texto.
-                    # MEJORA V2: Reconstruir payload completo de OpenAI.
-                    
-                    # Vamos a incluir una nota en el contenido si hay imagenes
-                    content_str = msg["content"]
-                    if msg.get("images") and len(msg["images"]) > 0:
-                        content_str += f" [El usuario adjuntó {len(msg['images'])} imágenes]"
-                    
                     role = "assistant" if msg["role"] == "agent" else msg["role"]
-                    formatted_history.append({
-                        "role": role,
-                        "content": content_str
-                    })
+                    content = msg["content"]
+                    images = msg.get("images", [])
+
+                    # Si hay imágenes y es mensaje de usuario, construimos payload multimodal
+                    if role == "user" and images and len(images) > 0:
+                        content_payload = [{"type": "text", "text": content}]
+                        for img_url in images:
+                            content_payload.append({
+                                "type": "image_url",
+                                "image_url": {"url": img_url}
+                            })
+                        
+                        formatted_history.append({
+                            "role": role,
+                            "content": content_payload
+                        })
+                    else:
+                        # Texto normal
+                        # Si es asistente y tenía imágenes (raro en este flujo pero posible), las mencionamos
+                        if role == "assistant" and images:
+                             content += f"\n[El asistente generó {len(images)} imágenes]"
+
+                        formatted_history.append({
+                            "role": role,
+                            "content": content
+                        })
 
             return formatted_history
         except Exception as e:

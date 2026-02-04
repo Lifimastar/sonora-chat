@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from openai import OpenAI
 from loguru import logger
 
@@ -303,71 +303,119 @@ NOTA: Estás respondiendo en modo TEXTO (no voz).
 
 @router.post("/upload")
 async def upload_file(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...), # Ahora aceptamos lista
     conversation_id: str = Form(...),
     user_id: str = Form(None),
     message: str = Form(""),
-    image_urls: str = Form("")  # URLs de imágenes separadas por coma
+    image_urls: str = Form("")  # URLs de imágenes externas (si las hay)
 ):
-    """Endpoint para subir archivos con mensaje opcional."""
+    """Endpoint para subir múltiples archivos con mensaje opcional."""
     db_service = DatabaseService()
     db_service.conversation_id = conversation_id
     db_service.user_id = user_id
 
     try:
-        # Leer archivo
-        file_content = await file.read()
+        combined_text_content = ""
+        processed_files_names = []
+        # Importar dependencias dentro de la función para asegurar que estan disponibles
+        import base64
+        import io
+        
+        # Lista de mensajes de contenido multimodal para OpenAI
+        openai_content = [{"type": "text", "text": message if message.strip() else "Analiza los archivos adjuntos."}]
+        
+        # Procesar imágenes externas primero (si las hay)
+        if image_urls:
+            urls = [url.strip() for url in image_urls.split(",") if url.strip()]
+            for url in urls:
+                openai_content.append({"type": "image_url", "image_url": {"url": url}})
 
-        MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB
-        if len(file_content) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=413, detail="Archivo muy grande. Maximo 10MB.")
+        for file in files:
+            # Leer archivo
+            file_content = await file.read()
+            MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB
+            
+            if len(file_content) > MAX_FILE_SIZE:
+                 logger.warning(f"Archivo {file.filename} ignorado por tamaño excesivo")
+                 continue
 
-        file_name = file.filename
-        file_type = file.content_type
+            file_name = file.filename
+            file_type = file.content_type
+            processed_files_names.append(file_name)
+            
+            logger.info(f"📁 Archivo recibido: {file_name} (MIME: {file_type})")
 
-        logger.info(f"📁 Archivo recibido: {file_name} (MIME: {file_type})")
+            # 1. IMAGENES
+            if file_type and file_type.startswith("image/"):
+                image_base64 = base64.b64encode(file_content).decode("utf-8")
+                openai_content.append({
+                    "type": "image_url", 
+                    "image_url": {"url": f"data:{file_type};base64,{image_base64}"}
+                })
+            
+            # 2. PDF
+            elif file_type == "application/pdf" or (file_name and file_name.lower().endswith(".pdf")):
+                from pypdf import PdfReader
+                try:
+                    pdf_reader = PdfReader(io.BytesIO(file_content))
+                    pdf_text = f"\n\n--- Contenido PDF: {file_name} ---\n"
+                    for page in pdf_reader.pages:
+                         pdf_text += page.extract_text() + "\n"
+                    combined_text_content += pdf_text
+                except Exception as e:
+                    logger.error(f"Error PDF {file_name}: {e}")
+                    combined_text_content += f"\n[Error leyendo PDF {file_name}]"
 
-        # Extraer texto segun tipo
-        text_content = ""
-        if file_type and file_type.startswith("image/"):
-            # Para imagenes, las procesamos como base64
-            import base64
-            image_base64 = base64.b64encode(file_content).decode("utf-8")
+            # 3. DOCX
+            elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or (file_name and file_name.lower().endswith(".docx")):
+                from docx import Document
+                try:
+                    doc = Document(io.BytesIO(file_content))
+                    docx_text = f"\n\n--- Contenido DOCX: {file_name} ---\n"
+                    docx_text += "\n".join([para.text for para in doc.paragraphs])
+                    combined_text_content += docx_text
+                except Exception as e:
+                    logger.error(f"Error DOCX {file_name}: {e}")
+                    combined_text_content += f"\n[Error leyendo DOCX {file_name}]"
 
-            # Guardar mensaje del usuario con referencia a imagen
-            user_msg = message if message else f"[Imagen: {file_name}]"
-            # Parsear URLs de imágenes
-            img_list = [url.strip() for url in image_urls.split(",") if url.strip()] if image_urls else []
-            db_service.add_message("user", user_msg, images=img_list)
+            # 4. TEXTO PLANO
+            elif file_type in ["text/plain", "text/markdown"] or (file_name and file_name.lower().endswith((".txt", ".md", ".json"))):
+                 text = file_content.decode("utf-8")
+                 combined_text_content += f"\n\n--- Contenido {file_name} ---\n{text}"
+            
+            else:
+                 combined_text_content += f"\n[Archivo adjunto no legible: {file_name}]"
 
-            # Llamar a OpenAI con la imagen
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": message if message.strip() else "Describe brevemente esta imagen y pregunta al usuario qué quiere saber sobre ella o qué quiere hacer con ella."},
-                        {"type": "image_url", "image_url": {"url": f"data:{file_type};base64,{image_base64}"}}
-                    ]}
-                ],
-                stream=True
-            )
-        elif file_type in ["text/plain", "text/markdown"] or (file_name and file_name.lower().endswith((".txt", ".md", ".json"))):
-            text_content = file_content.decode("utf-8")
-            user_msg = f"{message}\n📄 [Archivo adjunto: {file_name}]"
-            db_service.add_message("user", user_msg)
+        # Guardar en DB
+        # Construimos el mensaje del usuario con referencias a TODOS los archivos
+        files_str = ", ".join([f"[{name}]" for name in processed_files_names])
+        
+        # Mofidicación CRÍTICA: Guardar el contenido del texto en el historial para persistencia
+        user_msg = f"{message}\n📄 Adjuntos: {files_str}"
+        if combined_text_content:
+            # Añadimos el contenido de los archivos al mensaje guardado para que quede en memoria
+            user_msg += f"\n\n[CONTENIDO DE ARCHIVOS]:\n{combined_text_content[:30000]}" # Limitamos a ~30k caracteres para no saturar DB
+        
+        # Si hubo URLs de imágenes externas, las pasamos también
+        img_list_db = [url.strip() for url in image_urls.split(",") if url.strip()] if image_urls else []
+        db_service.add_message("user", user_msg, images=img_list_db)
 
-            # Llamar a OpenAI con el texto
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"{message}\n\nContenido del archivo {file_name}:\n{text_content}"}
-                ],
-                stream=True
-            )
-        else:
-            return {"error": f"Tipo de archivo no soportado: {file_type}"}
+        # Agregar texto extraído al contexto de OpenAI (si ya lo metimos en user_msg, no hace falta duplicarlo aqui si usamos el historial, PERO
+        # en este turno especifico 'openai_content' se usa directo.
+        # Sin embargo, como 'openai_content' es una lista multimodal, el texto base ya incluye "Analiza los archivos...".
+        # Podemos añadir el contenido extraido tambien para asegurarnos que lo lea con prioridad.
+        if combined_text_content:
+             openai_content.append({"type": "text", "text": f"\n\nCONTENIDO EXTRAÍDO:\n{combined_text_content[:30000]}"})
+
+        # Llamada a OpenAI
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", # O gpt-4o si queremos mejor visión, pero mini es más rápido/barato y tiene visión
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": openai_content}
+            ],
+            stream=True
+        )
 
         # Streaming de respuesta
         async def generate():
