@@ -82,10 +82,24 @@ def format_context_for_llm(search_results: List[Dict]) -> str:
         doc_name = result.get('document_name', 'Documento desconocido')
         chunk_text = result.get('chunk_text', '')
         similarity = result.get('similarity', 0)
+        metadata = result.get('metadata') or {}
         
-        context_parts.append(
-            f"[Fuente {idx}: {doc_name} (relevancia: {similarity:.2%})]\n{chunk_text}"
-        )
+        # Extraer metadata enriquecida si existe
+        summary = metadata.get('summary', '')
+        keywords = metadata.get('keywords', [])
+        
+        # Construir header con información útil
+        header = f"[Fuente {idx}: {doc_name} (relevancia: {similarity:.2%})]"
+        
+        # Agregar resumen si existe
+        if summary and summary != "Sin resumen":
+            header += f"\nResumen: {summary}"
+        
+        # Agregar keywords si existen
+        if keywords:
+            header += f"\nTemas: {', '.join(keywords)}"
+        
+        context_parts.append(f"{header}\n{chunk_text}")
     
     return "\n\n---\n\n".join(context_parts)
 
