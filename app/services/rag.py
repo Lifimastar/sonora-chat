@@ -84,32 +84,28 @@ def format_context_for_llm(search_results: List[Dict]) -> str:
         similarity = result.get('similarity', 0)
         metadata = result.get('metadata') or {}
         
-        # Extraer metadata enriquecida si existe
-        summary = metadata.get('summary', '')
-        keywords = metadata.get('keywords', [])
-        
-        # Construir header con información útil
-        header = f"[Fuente {idx}: {doc_name} (relevancia: {similarity:.2%})]"
+        # Header claro y prominente con nombre del documento
+        part = f"═══ DOCUMENTO: {doc_name} (relevancia: {similarity:.0%}) ═══\n"
         
         # Agregar resumen si existe
+        summary = metadata.get('summary', '')
         if summary and summary != "Sin resumen":
-            header += f"\nResumen: {summary}"
+            part += f"Resumen: {summary}\n"
         
-        # Agregar keywords si existen
-        if keywords:
-            header += f"\nTemas: {', '.join(keywords)}"
-        
-        context_parts.append(f"{header}\n{chunk_text}")
+        part += f"\n{chunk_text}"
+        context_parts.append(part)
     
-    return "\n\n---\n\n".join(context_parts)
+    context = "\n\n---\n\n".join(context_parts)
+    context += "\n\n⚠️ RECUERDA: cita EXACTAMENTE el nombre del DOCUMENTO de donde sacaste la información. Solo usa lo que está arriba, NO inventes."
+    return context
 
 def get_relevant_context(query: str) -> str:
     """
     Función principal para obtener contexto relevante.
     """
     # Buscar documentos relevantes
-    # BAJAMOS EL UMBRAL A 0.3 PARA MAYOR RECALL
-    results = search_knowledge_base(query, match_threshold=0.3, match_count=6)
+    # Umbral 0.55 para evitar chunks irrelevantes que causan alucinaciones
+    results = search_knowledge_base(query, match_threshold=0.55, match_count=4)
     
     # Formatear para el LLM
     context = format_context_for_llm(results)

@@ -191,10 +191,7 @@ async def chat(request: ChatRequest):
         # 3. Construir mensajes
         system_content = SYSTEM_PROMPT + """
 
-NOTA: Estás respondiendo en modo TEXTO (no voz).
-- Puedes usar formato markdown si mejora la legibilidad.
-- Puedes usar listas con viñetas o numeradas.
-- Puedes usar negritas para enfatizar puntos importantes."""
+NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MARKDOWN del prompt."""
         
         if memory:
             system_content += memory
