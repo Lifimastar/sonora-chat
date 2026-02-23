@@ -36,7 +36,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "buscar_informacion",
-            "description": "Busca información en la base de conocimiento sobre contratos, términos y condiciones.",
+            "description": "Busca información en la base de conocimiento. Incluye documentos, CVs, contratos, términos y condiciones, perfiles de personas, y cualquier archivo subido por el administrador.",
             "parameters": {
                 "type": "object",
                 "properties": {

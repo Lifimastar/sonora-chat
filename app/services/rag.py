@@ -34,7 +34,7 @@ def generate_query_embedding_cached(query: str) -> tuple:
 
 def search_knowledge_base(
     query: str, 
-    match_threshold: float = 0.78,
+    match_threshold: float = 0.35,
     match_count: int = 3
 ) -> List[Dict]:
     """
@@ -99,13 +99,84 @@ def format_context_for_llm(search_results: List[Dict]) -> str:
     context += "\n\n⚠️ RECUERDA: cita EXACTAMENTE el nombre del DOCUMENTO de donde sacaste la información. Solo usa lo que está arriba, NO inventes."
     return context
 
+def keyword_search_fallback(query: str, max_results: int = 3) -> List[Dict]:
+    """
+    Búsqueda por palabras clave como fallback cuando la búsqueda semántica falla.
+    Busca en chunk_text y document_name usando ILIKE.
+    """
+    import re
+    supabase = get_supabase()
+    
+    # Extraer palabras significativas (>= 3 chars, sin stopwords)
+    stopwords = {'que', 'del', 'los', 'las', 'una', 'uno', 'con', 'por', 'para', 'como', 
+                 'más', 'esta', 'este', 'ese', 'eso', 'son', 'tiene', 'dice', 'hay',
+                 'qué', 'cómo', 'cuál', 'dónde', 'quién', 'archivo', 'documento'}
+    words = re.findall(r'\w+', query.lower())
+    keywords = [w for w in words if len(w) >= 3 and w not in stopwords]
+    
+    if not keywords:
+        return []
+    
+    results = []
+    
+    # 1. Buscar por nombre de documento (si el query contiene algo que parezca un filename)
+    for kw in keywords:
+        response = supabase.from_('knowledge_base') \
+            .select('id, document_name, document_type, chunk_text, metadata') \
+            .ilike('document_name', f'%{kw}%') \
+            .limit(max_results) \
+            .execute()
+        if response.data:
+            for r in response.data:
+                r['similarity'] = 0.5  # Score artificial para fallback
+            results.extend(response.data)
+            break
+    
+    # 2. Si no encontramos por nombre, buscar en chunk_text
+    if not results:
+        for kw in keywords:
+            response = supabase.from_('knowledge_base') \
+                .select('id, document_name, document_type, chunk_text, metadata') \
+                .ilike('chunk_text', f'%{kw}%') \
+                .limit(max_results) \
+                .execute()
+            if response.data:
+                for r in response.data:
+                    r['similarity'] = 0.4  # Score más bajo para match por texto
+                results.extend(response.data)
+                break
+    
+    # Deduplicar por id
+    seen = set()
+    unique = []
+    for r in results:
+        if r['id'] not in seen:
+            seen.add(r['id'])
+            unique.append(r)
+    
+    return unique[:max_results]
+
 def get_relevant_context(query: str) -> str:
     """
     Función principal para obtener contexto relevante.
+    Usa búsqueda semántica + fallback por keywords.
     """
-    # Buscar documentos relevantes
-    # Umbral 0.55 para evitar chunks irrelevantes que causan alucinaciones
-    results = search_knowledge_base(query, match_threshold=0.55, match_count=4)
+    # 1. Búsqueda semántica (principal)
+    results = search_knowledge_base(query, match_threshold=0.35, match_count=5)
+    
+    # Log para debug
+    if results:
+        sims = [f"{r.get('similarity',0):.3f}" for r in results]
+        print(f"🔍 RAG: query='{query[:50]}' → {len(results)} resultados, sims=[{', '.join(sims)}]")
+    else:
+        print(f"🔍 RAG: query='{query[:50]}' → SIN RESULTADOS semánticos")
+        
+        # 2. Fallback: búsqueda por keywords
+        results = keyword_search_fallback(query)
+        if results:
+            print(f"🔍 RAG FALLBACK: encontrados {len(results)} resultados por keywords")
+        else:
+            print(f"🔍 RAG FALLBACK: tampoco encontró resultados por keywords")
     
     # Formatear para el LLM
     context = format_context_for_llm(results)
