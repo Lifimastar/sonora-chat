@@ -1,3 +1,57 @@
+import time
+from loguru import logger
+from app.core.supabase_client import get_supabase
+
+# Cache de prompts de pilares (evita consultar DB en cada request)
+_pilar_cache = {}  # {pilar_id: {"prompt": str, "nombre": str, "timestamp": float}}
+_CACHE_TTL = 300  # 5 minutos
+
+def get_pilar_prompt(pilar_id: int) -> tuple[str, str]:
+    """Obtiene el system_prompt y nombre del pilar desde la DB (con cache).
+    Retorna (system_prompt, nombre) o (None, None) si no existe."""
+    now = time.time()
+    
+    # Revisar cache
+    if pilar_id in _pilar_cache:
+        cached = _pilar_cache[pilar_id]
+        if now - cached["timestamp"] < _CACHE_TTL:
+            return cached["prompt"], cached["nombre"]
+    
+    # Consultar DB
+    try:
+        supabase = get_supabase()
+        result = supabase.table("pilares").select("system_prompt, nombre").eq("id", pilar_id).single().execute()
+        if result.data:
+            prompt = result.data["system_prompt"]
+            nombre = result.data["nombre"]
+            _pilar_cache[pilar_id] = {"prompt": prompt, "nombre": nombre, "timestamp": now}
+            logger.info(f"✅ Prompt cargado para Pilar {pilar_id}: {nombre}")
+            return prompt, nombre
+    except Exception as e:
+        logger.error(f"Error cargando prompt del pilar {pilar_id}: {e}")
+    
+    return None, None
+
+
+def get_system_prompt(pilar_id: int = None) -> str:
+    """Construye el system prompt completo: base + pilar específico."""
+    prompt = SYSTEM_PROMPT
+    
+    if pilar_id:
+        pilar_prompt, nombre = get_pilar_prompt(pilar_id)
+        if pilar_prompt:
+            prompt += f"""
+
+--- ROL ESPECÍFICO ---
+Estás asistiendo al equipo del Pilar: {nombre}.
+Tu comportamiento, obligaciones y límites están definidos a continuación:
+
+{pilar_prompt}
+--- FIN ROL ESPECÍFICO ---"""
+    
+    return prompt
+
+
 SYSTEM_PROMPT = """Eres Sonora, el asistente experto y amigable del Ecosistema Red Futura (que incluye Tu Guía Argentina).
 
 CAPACIDADES:

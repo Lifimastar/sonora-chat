@@ -14,7 +14,7 @@ from loguru import logger
 from app.services.database import DatabaseService
 from app.services.rag import get_relevant_context
 from app.services.tuguia_database import TuGuiaDatabase
-from app.prompts import SYSTEM_PROMPT
+from app.prompts import SYSTEM_PROMPT, get_system_prompt
 
 router = APIRouter()
 
@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     conversation_id: str
     user_id: Optional[str] = None
     camera_image: Optional[str] = None  # Imagen base64 de la cámara
+    pilar_id: Optional[int] = None  # ID del pilar del usuario
 
 # Definir las tools para el LLM (mismas que en bot.py)
 TOOLS = [
@@ -112,12 +113,12 @@ TOOLS = [
     }
 ]
 
-def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, user_id: str = None) -> dict:
+def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, user_id: str = None, pilar_id: int = None) -> dict:
     """Ejecuta una tool y retorna el resultado."""
     try:
         if tool_name == "buscar_informacion":
             query = arguments.get("query", "")
-            context = get_relevant_context(query)
+            context = get_relevant_context(query, pilar_id=pilar_id)
             return {"success": True, "informacion": context}
         
         elif tool_name == "contar_usuarios_tuguia":
@@ -188,8 +189,9 @@ async def chat(request: ChatRequest):
         history = get_conversation_history(request.conversation_id, db_service)
         memory = get_user_memory(request.user_id, db_service) if request.user_id else ""
         
-        # 3. Construir mensajes
-        system_content = SYSTEM_PROMPT + """
+        # 3. Construir mensajes (prompt dinámico por pilar)
+        base_prompt = get_system_prompt(request.pilar_id)
+        system_content = base_prompt + """
 
 NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MARKDOWN del prompt."""
         
@@ -252,7 +254,7 @@ NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MA
                             "content": json.dumps({"success": False, "mensaje": "No hay imagen de cámara disponible. Asegúrate de que tu cámara esté encendida."})
                         })
                 else:
-                    result = execute_tool(tool_name, arguments, db_service, request.user_id)
+                    result = execute_tool(tool_name, arguments, db_service, request.user_id, request.pilar_id)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -304,7 +306,8 @@ async def upload_file(
     conversation_id: str = Form(...),
     user_id: str = Form(None),
     message: str = Form(""),
-    image_urls: str = Form("")  # URLs de imágenes externas (si las hay)
+    image_urls: str = Form(""),  # URLs de imágenes externas (si las hay)
+    pilar_id: int = Form(None)  # ID del pilar del usuario
 ):
     """Endpoint para subir múltiples archivos con mensaje opcional."""
     db_service = DatabaseService()
@@ -408,7 +411,7 @@ async def upload_file(
         response = client.chat.completions.create(
             model="gpt-4o-mini", # O gpt-4o si queremos mejor visión, pero mini es más rápido/barato y tiene visión
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": get_system_prompt(pilar_id)},
                 {"role": "user", "content": openai_content}
             ],
             stream=True

@@ -35,7 +35,8 @@ def generate_query_embedding_cached(query: str) -> tuple:
 def search_knowledge_base(
     query: str, 
     match_threshold: float = 0.35,
-    match_count: int = 3
+    match_count: int = 3,
+    pilar_id: int = None
 ) -> List[Dict]:
     """
     Busca en la base de conocimiento usando similitud semántica.
@@ -44,6 +45,7 @@ def search_knowledge_base(
         query: Pregunta del usuario
         match_threshold: Umbral mínimo de similitud (0-1)
         match_count: Número máximo de resultados
+        pilar_id: ID del pilar (filtra documentos; Pilar 1 ve todo)
     
     Returns:
         Lista de chunks relevantes con metadata
@@ -52,13 +54,17 @@ def search_knowledge_base(
     query_embedding = list(generate_query_embedding_cached(query))
     
     # Buscar en Supabase usando la función match_documents
+    rpc_params = {
+        'query_embedding': query_embedding,
+        'match_threshold': match_threshold,
+        'match_count': match_count
+    }
+    if pilar_id:
+        rpc_params['p_pilar_id'] = pilar_id
+    
     response = supabase.rpc(
         'match_documents',
-        {
-            'query_embedding': query_embedding,
-            'match_threshold': match_threshold,
-            'match_count': match_count
-        }
+        rpc_params
     ).execute()
     
     return response.data
@@ -99,7 +105,7 @@ def format_context_for_llm(search_results: List[Dict]) -> str:
     context += "\n\n⚠️ RECUERDA: cita EXACTAMENTE el nombre del DOCUMENTO de donde sacaste la información. Solo usa lo que está arriba, NO inventes."
     return context
 
-def keyword_search_fallback(query: str, max_results: int = 3) -> List[Dict]:
+def keyword_search_fallback(query: str, max_results: int = 3, pilar_id: int = None) -> List[Dict]:
     """
     Búsqueda por palabras clave como fallback cuando la búsqueda semántica falla.
     Busca en chunk_text y document_name usando ILIKE.
@@ -119,13 +125,20 @@ def keyword_search_fallback(query: str, max_results: int = 3) -> List[Dict]:
     
     results = []
     
+    def apply_pilar_filter(query_builder):
+        """Aplica filtro de pilar a la query si es necesario."""
+        if pilar_id and pilar_id != 1:  # Pilar 1 ve todo
+            return query_builder.or_(f'pilar_id.eq.{pilar_id},pilar_id.is.null')
+        return query_builder
+    
     # 1. Buscar por nombre de documento (si el query contiene algo que parezca un filename)
     for kw in keywords:
-        response = supabase.from_('knowledge_base') \
+        q = supabase.from_('knowledge_base') \
             .select('id, document_name, document_type, chunk_text, metadata') \
             .ilike('document_name', f'%{kw}%') \
-            .limit(max_results) \
-            .execute()
+            .limit(max_results)
+        q = apply_pilar_filter(q)
+        response = q.execute()
         if response.data:
             for r in response.data:
                 r['similarity'] = 0.5  # Score artificial para fallback
@@ -135,11 +148,12 @@ def keyword_search_fallback(query: str, max_results: int = 3) -> List[Dict]:
     # 2. Si no encontramos por nombre, buscar en chunk_text
     if not results:
         for kw in keywords:
-            response = supabase.from_('knowledge_base') \
+            q = supabase.from_('knowledge_base') \
                 .select('id, document_name, document_type, chunk_text, metadata') \
                 .ilike('chunk_text', f'%{kw}%') \
-                .limit(max_results) \
-                .execute()
+                .limit(max_results)
+            q = apply_pilar_filter(q)
+            response = q.execute()
             if response.data:
                 for r in response.data:
                     r['similarity'] = 0.4  # Score más bajo para match por texto
@@ -156,23 +170,24 @@ def keyword_search_fallback(query: str, max_results: int = 3) -> List[Dict]:
     
     return unique[:max_results]
 
-def get_relevant_context(query: str) -> str:
+def get_relevant_context(query: str, pilar_id: int = None) -> str:
     """
     Función principal para obtener contexto relevante.
     Usa búsqueda semántica + fallback por keywords.
+    Filtra por pilar_id si se proporciona.
     """
     # 1. Búsqueda semántica (principal)
-    results = search_knowledge_base(query, match_threshold=0.35, match_count=5)
+    results = search_knowledge_base(query, match_threshold=0.35, match_count=5, pilar_id=pilar_id)
     
     # Log para debug
     if results:
         sims = [f"{r.get('similarity',0):.3f}" for r in results]
-        print(f"🔍 RAG: query='{query[:50]}' → {len(results)} resultados, sims=[{', '.join(sims)}]")
+        print(f"🔍 RAG: query='{query[:50]}' pilar={pilar_id} → {len(results)} resultados, sims=[{', '.join(sims)}]")
     else:
-        print(f"🔍 RAG: query='{query[:50]}' → SIN RESULTADOS semánticos")
+        print(f"🔍 RAG: query='{query[:50]}' pilar={pilar_id} → SIN RESULTADOS semánticos")
         
         # 2. Fallback: búsqueda por keywords
-        results = keyword_search_fallback(query)
+        results = keyword_search_fallback(query, pilar_id=pilar_id)
         if results:
             print(f"🔍 RAG FALLBACK: encontrados {len(results)} resultados por keywords")
         else:
