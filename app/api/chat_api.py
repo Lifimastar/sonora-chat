@@ -110,6 +110,24 @@ TOOLS = [
             "description": "Captura y analiza lo que ve la cámara del usuario. Úsala cuando te pregunten qué ves, qué tienes enfrente, o cualquier pregunta visual.",
             "parameters": {"type": "object", "properties": {}}
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_actividad",
+            "description": "Consulta estadísticas de actividad del ecosistema: cantidad de conversaciones, mensajes, usuarios activos, documentos en knowledge base, y actividad por período. Úsala cuando pregunten por reportes, estadísticas, actividad, o cuántas conversaciones/mensajes hay.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tipo": {
+                        "type": "string",
+                        "enum": ["resumen_general", "actividad_hoy", "actividad_semana", "actividad_mes"],
+                        "description": "Tipo de consulta: resumen_general=totales globales, actividad_hoy=actividad del dia, actividad_semana=ultimos 7 dias, actividad_mes=ultimos 30 dias"
+                    }
+                },
+                "required": ["tipo"]
+            }
+        }
     }
 ]
 
@@ -148,6 +166,11 @@ def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, u
         elif tool_name == "ver_camara":
             # Se maneja de forma especial en el endpoint
             return {"success": True, "use_camera": True}
+        
+        elif tool_name == "consultar_actividad":
+            tipo = arguments.get("tipo", "resumen_general")
+            result = db_service.get_activity_stats(tipo)
+            return result
         
         else:
             return {"success": False, "error": f"Tool '{tool_name}' no implementada"}

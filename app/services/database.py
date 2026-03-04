@@ -2,6 +2,7 @@
 Servicio para interactuar con Supabase y guardar el historial de chat.
 """
 import os
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from loguru import logger
 from supabase import create_client, Client
@@ -192,15 +193,75 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"❌ Error borrando memoria: {e}")
             return False
-    
-    # def ensure_user_exists(self, user_id: str):
-    #     """Asegura que el usuario exista en la tabla users para evitar errores de FK"""
-    #     try:
-    #         # Solo insertamos el ID. Si ya existe, no hacemos nada (on_conflict='id').
-    #         # En Supabase-py, upsert maneja esto.
-    #         data = {"id": user_id} 
-    #         self.client.table("users").upsert(data).execute()
-    #     except Exception as e:
-    #         # Si falla, logueamos pero NO detenemos el bot, para ver si la conversación pasa igual
-    #         # (aunque si la FK es estricta, fallará luego en create_conversation)
-    #         logger.warning(f"⚠️ Warning: No se pudo sincronizar usuario {user_id}: {e}")
+
+    def get_activity_stats(self, tipo: str = "resumen_general") -> dict:
+        """Obtiene estadísticas de actividad del ecosistema."""
+        try:
+            now = datetime.now(timezone.utc)
+            
+            if tipo == "resumen_general":
+                # Total conversaciones
+                convos = self.client.table("conversations").select("id", count="exact").execute()
+                total_convos = convos.count if convos.count is not None else len(convos.data)
+                
+                # Total mensajes
+                msgs = self.client.table("messages").select("id", count="exact").execute()
+                total_msgs = msgs.count if msgs.count is not None else len(msgs.data)
+                
+                # Usuarios distintos (de conversations)
+                users_data = self.client.table("conversations").select("user_id").not_.is_("user_id", "null").execute()
+                unique_users = len(set(row["user_id"] for row in users_data.data)) if users_data.data else 0
+                
+                # Documentos en knowledge base
+                kb = self.client.table("knowledge_base").select("id", count="exact").execute()
+                total_kb = kb.count if kb.count is not None else len(kb.data)
+                
+                return {
+                    "success": True,
+                    "tipo": "Resumen General",
+                    "total_conversaciones": total_convos,
+                    "total_mensajes": total_msgs,
+                    "usuarios_distintos": unique_users,
+                    "documentos_knowledge_base": total_kb,
+                }
+
+            elif tipo in ("actividad_hoy", "actividad_semana", "actividad_mes"):
+                if tipo == "actividad_hoy":
+                    since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    label = "Hoy"
+                elif tipo == "actividad_semana":
+                    since = now - timedelta(days=7)
+                    label = "Últimos 7 días"
+                else:
+                    since = now - timedelta(days=30)
+                    label = "Últimos 30 días"
+                
+                since_iso = since.isoformat()
+                
+                # Conversaciones en el período
+                convos = self.client.table("conversations").select("id", count="exact").gte("created_at", since_iso).execute()
+                period_convos = convos.count if convos.count is not None else len(convos.data)
+                
+                # Mensajes en el período
+                msgs = self.client.table("messages").select("id", count="exact").gte("created_at", since_iso).execute()
+                period_msgs = msgs.count if msgs.count is not None else len(msgs.data)
+                
+                # Usuarios activos en el período
+                users_data = self.client.table("conversations").select("user_id").not_.is_("user_id", "null").gte("created_at", since_iso).execute()
+                active_users = len(set(row["user_id"] for row in users_data.data)) if users_data.data else 0
+                
+                return {
+                    "success": True,
+                    "tipo": f"Actividad — {label}",
+                    "periodo": label,
+                    "conversaciones": period_convos,
+                    "mensajes": period_msgs,
+                    "usuarios_activos": active_users,
+                }
+            
+            else:
+                return {"success": False, "error": f"Tipo de reporte no reconocido: {tipo}"}
+                
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo estadísticas: {e}")
+            return {"success": False, "error": str(e)}
