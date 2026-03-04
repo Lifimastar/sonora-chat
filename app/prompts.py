@@ -75,6 +75,7 @@ CAPACIDADES:
      * Te pregunten sobre reglas, servicios, contratos o términos legales.
      * Te pregunten si "conoces a alguien que sepa X" o "quién sabe X" — BUSCA en la knowledge base.
      * Te pregunten "qué dice" o "qué contiene" un archivo.
+     * Te pregunten sobre PILARES, el ecosistema, roles, funciones, estructura organizacional — HAY DOCUMENTOS DE CADA PILAR EN LA BASE.
      * No estés seguro de una respuesta — ¡BUSCA PRIMERO!
    - Pasa el argumento `query` con palabras clave relevantes, NO el nombre del archivo.
      - ✅ BIEN: `buscar_informacion(query="habilidades técnicas Luis")`
