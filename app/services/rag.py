@@ -34,8 +34,8 @@ def generate_query_embedding_cached(query: str) -> tuple:
 
 def search_knowledge_base(
     query: str, 
-    match_threshold: float = 0.35,
-    match_count: int = 3,
+    match_threshold: float = 0.30,
+    match_count: int = 8,
     pilar_id: int = None
 ) -> List[Dict]:
     """
@@ -105,7 +105,7 @@ def format_context_for_llm(search_results: List[Dict]) -> str:
     context += "\n\n⚠️ RECUERDA: cita EXACTAMENTE el nombre del DOCUMENTO de donde sacaste la información. Solo usa lo que está arriba, NO inventes."
     return context
 
-def keyword_search_fallback(query: str, max_results: int = 3, pilar_id: int = None) -> List[Dict]:
+def keyword_search_fallback(query: str, max_results: int = 5, pilar_id: int = None) -> List[Dict]:
     """
     Búsqueda por palabras clave como fallback cuando la búsqueda semántica falla.
     Busca en chunk_text y document_name usando ILIKE.
@@ -177,7 +177,7 @@ def get_relevant_context(query: str, pilar_id: int = None) -> str:
     Filtra por pilar_id si se proporciona.
     """
     # 1. Búsqueda semántica (principal)
-    results = search_knowledge_base(query, match_threshold=0.35, match_count=5, pilar_id=pilar_id)
+    results = search_knowledge_base(query, match_threshold=0.30, match_count=8, pilar_id=pilar_id)
     
     # Log para debug
     if results:
