@@ -18,10 +18,11 @@ from app.prompts import SYSTEM_PROMPT, get_system_prompt
 
 router = APIRouter()
 
-# Cliente OpenAI
+# Cliente OpenAI configurado para Assistants V2
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
-    timeout=30.0
+    timeout=30.0,
+    default_headers={"OpenAI-Beta": "assistants=v2"}
 )
 
 class ChatRequest(BaseModel):
@@ -30,6 +31,7 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     camera_image: Optional[str] = None  # Imagen base64 de la cámara
     pilar_id: Optional[int] = None  # ID del pilar del usuario
+    agent_id: Optional[str] = None  # ID de OpenAI Assistant (si eligió un agente especializado)
 
 # Definir las tools para el LLM (mismas que en bot.py)
 TOOLS = [
@@ -195,11 +197,30 @@ def get_user_memory(user_id: str, db_service: DatabaseService) -> str:
         return ""
     # memories es un diccionario {key: value}, iteramos sobre items()
     memory_text = "\n".join([f"- {key}: {value}" for key, value in memories.items()])
-    return f"\n\nMEMORIA DEL USUARIO:\n{memory_text}"
+def get_or_create_thread(conversation_id: str, db_service: DatabaseService) -> str:
+    """Consulteer o crear un Thread de OpenAI asociado a una conversación específica."""
+    response = db_service.client.table("conversations").select("metadata").eq("id", conversation_id).execute()
+    if not response.data:
+        return None
+        
+    metadata = response.data[0].get("metadata", {})
+    if "openai_thread_id" in metadata:
+        return metadata["openai_thread_id"]
+        
+    # Crear nuevo thread
+    thread = client.beta.threads.create()
+    metadata["openai_thread_id"] = thread.id
+    
+    # Guardar en DB
+    db_service.client.table("conversations").update({"metadata": metadata}).eq("id", conversation_id).execute()
+    logger.info(f"🧵 Nuevo Thread creado en OpenAI: {thread.id}")
+    return thread.id
 
 @router.post("/chat")
 async def chat(request: ChatRequest):
     """Endpoint principal de chat."""
+    logger.info(f"📥 Payload recibido en FastAPI /chat: agent_id={request.agent_id}, pilar={request.pilar_id}, message={request.message[:20]}...")
+    
     db_service = DatabaseService()
     db_service.conversation_id = request.conversation_id
     db_service.user_id = request.user_id
@@ -208,6 +229,53 @@ async def chat(request: ChatRequest):
         # 1. Guardar mensaje del usuario
         db_service.add_message("user", request.message)
         
+        # --- FLUJO DE AGENTE ESPECIALIZADO (OpenAI Assistants) ---
+        if request.agent_id:
+            logger.info(f"🦸‍♂️ Usando Agente Especializado: {request.agent_id}")
+            thread_id = get_or_create_thread(request.conversation_id, db_service)
+            
+            if not thread_id:
+                raise HTTPException(status_code=404, detail="No se encontró la conversación.")
+            
+            # 1. Añadir el mensaje al hilo
+            client.beta.threads.messages.create(
+                thread_id=thread_id,
+                role="user",
+                content=request.message
+            )
+            
+            # 2. Correr el Assistant con stream
+            # Forzamos las instrucciones para que la IA priorice la búsqueda en sus archivos
+            stream = client.beta.threads.runs.create(
+                thread_id=thread_id,
+                assistant_id=request.agent_id,
+                instructions="PRIORIDAD ABSOLUTA: Utiliza la herramienta 'file_search' para buscar en tu base de conocimiento OBLIGATORIAMENTE antes de responder si el usuario pregunta algo relacionado con tu dominio de especialidad o con los archivos que tienes adjuntos.",
+                stream=True
+            )
+            
+            async def generate_assistant():
+                full_response = ""
+                try:
+                    for event in stream:
+                        # Extraer deltas de mensaje
+                        if event.event == "thread.message.delta":
+                            content_delta = event.data.delta.content[0]
+                            if content_delta.type == 'text':
+                                text_val = content_delta.text.value
+                                full_response += text_val
+                                yield f"data: {json.dumps({'content': text_val})}\n\n"
+                    
+                    # Una vez terminado el stream, guardar en DB
+                    db_service.add_message("agent", full_response)
+                    yield "data: [DONE]\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"Error en streaming de assistant: {e}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    
+            return StreamingResponse(generate_assistant(), media_type="text/event-stream")
+
+        # --- FLUJO NORMAL (Sonora General - Chat Completions) ---
         # 2. Obtener contexto
         history = get_conversation_history(request.conversation_id, db_service)
         memory = get_user_memory(request.user_id, db_service) if request.user_id else ""
@@ -330,7 +398,8 @@ async def upload_file(
     user_id: str = Form(None),
     message: str = Form(""),
     image_urls: str = Form(""),  # URLs de imágenes externas (si las hay)
-    pilar_id: int = Form(None)  # ID del pilar del usuario
+    pilar_id: int = Form(None),  # ID del pilar del usuario
+    agent_id: str = Form(None)   # ID del asistente especializado si aplica
 ):
     """Endpoint para subir múltiples archivos con mensaje opcional."""
     db_service = DatabaseService()
@@ -430,6 +499,48 @@ async def upload_file(
         if combined_text_content:
              openai_content.append({"type": "text", "text": f"\n\nCONTENIDO EXTRAÍDO:\n{combined_text_content[:30000]}"})
 
+        # --- FLUJO DE AGENTE ESPECIALIZADO (OpenAI Assistants) ---
+        if agent_id:
+            logger.info(f"🦸‍♂️ Subida de archivo para Agente Especializado: {agent_id}")
+            thread_id = get_or_create_thread(conversation_id, db_service)
+            
+            if not thread_id:
+                raise HTTPException(status_code=404, detail="No se encontró la conversación.")
+            
+            # 1. Añadir el mensaje multimodal al hilo
+            client.beta.threads.messages.create(
+                thread_id=thread_id,
+                role="user",
+                content=openai_content
+            )
+            
+            # 2. Correr el Assistant con stream
+            stream = client.beta.threads.runs.create(
+                thread_id=thread_id,
+                assistant_id=agent_id,
+                stream=True
+            )
+            
+            async def generate_assistant():
+                full_response = ""
+                try:
+                    for event in stream:
+                        if event.event == "thread.message.delta":
+                            content_delta = event.data.delta.content[0]
+                            if content_delta.type == 'text':
+                                text_val = content_delta.text.value
+                                full_response += text_val
+                                yield f"data: {json.dumps({'content': text_val})}\n\n"
+                    
+                    db_service.add_message("agent", full_response)
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    logger.error(f"Error en streaming de assistant upload: {e}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    
+            return StreamingResponse(generate_assistant(), media_type="text/event-stream")
+
+        # --- FLUJO NORMAL (Sonora General - Chat Completions) ---
         # Llamada a OpenAI
         response = client.chat.completions.create(
             model="gpt-4o-mini", # O gpt-4o si queremos mejor visión, pero mini es más rápido/barato y tiene visión
