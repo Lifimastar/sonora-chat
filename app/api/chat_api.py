@@ -39,7 +39,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "buscar_informacion",
-            "description": "Busca información en la base de conocimiento. Incluye documentos, CVs, contratos, términos y condiciones, perfiles de personas, y cualquier archivo subido por el administrador.",
+            "description": "¡OBLIGATORIO usar esta tool antes de responder preguntas sobre la empresa, comisiones, operaciones, manuales o pilares! Busca información oficial en la base de conocimiento (PDFs, CVs, reglamentos, contratos).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -79,7 +79,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "guardar_dato",
-            "description": "Guarda un dato en la memoria persistente.",
+            "description": "Guarda un dato, preferencia o gusto del usuario en la memoria persistente. ¡NO usar para buscar ni registrar procesos operativos de la empresa!",
             "parameters": {
                 "type": "object",
                 "properties": {

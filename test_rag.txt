@@ -1,0 +1,40 @@
+
+=============================================
+QUERY: 'ahora decime la tabla de comisiones que utilizamos para pagarle al asesor comercial ?'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.6671 | Doc: 13. Tabla de comisiones.docx | Pilar: None
+Sim: 0.6328 | Doc: 1.1 Manual Maestro Tu Guía.docx | Pilar: None
+Sim: 0.6279 | Doc: 1.1 MANUAL DEL ASESOR COMERCIAL.docx | Pilar: None
+
+--- KEYWORD FALLBACK ---
+Total found: 1
+Sim: 0.5000 | Doc: 13. Tabla de comisiones.docx | Pilar: None
+
+=============================================
+QUERY: 'bien ahora decime las distintas formas que tiene un jefe de tribu para captar asesores comerciales'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.7252 | Doc: 1.2 MANUAL DEL JEFE DE TRIBU.docx | Pilar: None
+Sim: 0.7046 | Doc: 1.2 MANUAL DEL JEFE DE TRIBU.docx | Pilar: None
+Sim: 0.6900 | Doc: 1.2 MANUAL DEL JEFE DE TRIBU.docx | Pilar: None
+
+--- KEYWORD FALLBACK ---
+Total found: 5
+Sim: 0.5000 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx | Pilar: None
+Sim: 0.5000 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx | Pilar: None
+Sim: 0.5000 | Doc: 1.12 FORMAS DE CAPTAR  ASESORES COMERCIALES.docx | Pilar: None
+
+=============================================
+QUERY: 'bien, ahora conoces las formas en que un asesor puede captar a un adherido, confirmame'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.6425 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx | Pilar: None
+Sim: 0.6387 | Doc: 1.1 Manual Maestro Tu Guía.docx | Pilar: None
+Sim: 0.6098 | Doc: 1.1 Manual Maestro Tu Guía.docx | Pilar: None
+
+--- KEYWORD FALLBACK ---
+Total found: 5
+Sim: 0.5000 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx | Pilar: None
+Sim: 0.5000 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx | Pilar: None
+Sim: 0.5000 | Doc: 1.12 FORMAS DE CAPTAR  ASESORES COMERCIALES.docx | Pilar: None

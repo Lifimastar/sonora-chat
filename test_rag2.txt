@@ -1,0 +1,24 @@
+
+=============================================
+QUERY: 'tabla de comisiones asesor comercial'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.6796 | Doc: 13. Tabla de comisiones.docx
+Sim: 0.6582 | Doc: 1.1 Manual Maestro Tu Guía.docx
+Sim: 0.6341 | Doc: 1.1 Manual Maestro Tu Guía.docx
+
+=============================================
+QUERY: 'formas captar asesores comerciales jefe tribu'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.7334 | Doc: 1.2 MANUAL DEL JEFE DE TRIBU.docx
+Sim: 0.7272 | Doc: 1.12 FORMAS DE CAPTAR  ASESORES COMERCIALES.docx
+Sim: 0.7242 | Doc: 1.1 Manual Maestro Tu Guía.docx
+
+=============================================
+QUERY: 'formas asesor capta adherido'
+
+--- SEMANTIC SEARCH (Top 3) ---
+Sim: 0.6318 | Doc: 1.11 Formas en que un asesor comercial capta un nuevo adherido.docx
+Sim: 0.6179 | Doc: 1.1 Manual Maestro Tu Guía.docx
+Sim: 0.5580 | Doc: 1.1 Manual Maestro Tu Guía.docx
