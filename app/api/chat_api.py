@@ -30,9 +30,10 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str
     user_id: Optional[str] = None
-    camera_image: Optional[str] = None  # Imagen base64 de la cámara
-    pilar_id: Optional[int] = None  # ID del pilar del usuario
-    agent_id: Optional[str] = None  # ID de OpenAI Assistant (si eligió un agente especializado)
+    camera_image: Optional[str] = None
+    pilar_id: Optional[int] = None
+    agent_id: Optional[str] = None
+    regenerate: bool = False  # Si es true, no guardar msg del usuario (ya existe)
 
 # Definir las tools para el LLM (mismas que en bot.py)
 TOOLS = [
@@ -227,8 +228,9 @@ async def chat(request: ChatRequest):
     db_service.user_id = request.user_id
     
     try:
-        # 1. Guardar mensaje del usuario
-        db_service.add_message("user", request.message)
+        # 1. Guardar mensaje del usuario (salvo en regenerar)
+        if not request.regenerate:
+            db_service.add_message("user", request.message)
         
         # --- FLUJO DE AGENTE ESPECIALIZADO (OpenAI Assistants) ---
         if request.agent_id:
@@ -564,13 +566,13 @@ async def upload_file(
             return StreamingResponse(generate_assistant(), media_type="text/event-stream")
 
         # --- FLUJO NORMAL (Sonora General - Chat Completions) ---
+        history = db_service.get_history()
+        messages = [{"role": "system", "content": get_system_prompt(pilar_id)}] + history + [{"role": "user", "content": openai_content}]
+        
         # Llamada a OpenAI
         response = client.chat.completions.create(
-            model="gpt-4o-mini", # O gpt-4o si queremos mejor visión, pero mini es más rápido/barato y tiene visión
-            messages=[
-                {"role": "system", "content": get_system_prompt(pilar_id)},
-                {"role": "user", "content": openai_content}
-            ],
+            model="gpt-4o", # Para imágenes usamos gpt-4o porque tiene mucha mejor capacidad de visión y menos falsos positivos de safety
+            messages=messages,
             stream=True
         )
 
