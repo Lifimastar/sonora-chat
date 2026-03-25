@@ -4,6 +4,7 @@ Usa la misma lógica del bot de voz (OpenAI + Tools).
 """
 import os
 import json
+import asyncio
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -372,20 +373,42 @@ NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MA
         async def generate():
             full_response = ""
             try:
-                for chunk in response:
-                    content = chunk.choices[0].delta.content
-                    if content:
-                        full_response += content
-                        yield f"data: {json.dumps({'content': content})}\n\n"
-                
-                # Guardar respuesta del bot
+                # Ejecutar el iterador síncrono en un thread para no bloquear el event loop
+                loop = asyncio.get_event_loop()
+                queue: asyncio.Queue = asyncio.Queue()
+
+                def _stream_to_queue():
+                    try:
+                        for chunk in response:
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                loop.call_soon_threadsafe(queue.put_nowait, content)
+                        loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
+                    except Exception as e:
+                        loop.call_soon_threadsafe(queue.put_nowait, Exception(str(e)))
+
+                import threading
+                thread = threading.Thread(target=_stream_to_queue, daemon=True)
+                thread.start()
+
+                while True:
+                    item = await queue.get()
+                    if item is None:  # sentinel = done
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    full_response += item
+                    yield f"data: {json.dumps({'content': item})}\n\n"
+                    await asyncio.sleep(0)  # yield control so chunk gets sent
+
                 db_service.add_message("agent", full_response)
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 logger.error(f"Error en streaming: {e}")
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
-        
-        return StreamingResponse(generate(), media_type="text/event-stream")
+
+        return StreamingResponse(generate(), media_type="text/event-stream",
+                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
     
     except Exception as e:
         logger.error(f"Error en chat: {e}")
@@ -555,20 +578,41 @@ async def upload_file(
         async def generate():
             full_response = ""
             try:
-                for chunk in response:
-                    content = chunk.choices[0].delta.content
-                    if content:
-                        full_response += content
-                        yield f"data: {json.dumps({'content': content})}\n\n"
-                
-                # Guardar respuesta del bot
+                loop = asyncio.get_event_loop()
+                queue: asyncio.Queue = asyncio.Queue()
+
+                def _stream_to_queue():
+                    try:
+                        for chunk in response:
+                            content = chunk.choices[0].delta.content
+                            if content:
+                                loop.call_soon_threadsafe(queue.put_nowait, content)
+                        loop.call_soon_threadsafe(queue.put_nowait, None)
+                    except Exception as e:
+                        loop.call_soon_threadsafe(queue.put_nowait, Exception(str(e)))
+
+                import threading
+                threading.Thread(target=_stream_to_queue, daemon=True).start()
+
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    full_response += item
+                    yield f"data: {json.dumps({'content': item})}\n\n"
+                    await asyncio.sleep(0)
+
                 db_service.add_message("agent", full_response)
                 yield "data: [DONE]\n\n"
             except Exception as e:
                 logger.error(f"Error en streaming upload: {e}")
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-        return StreamingResponse(generate(), media_type="text/event-stream")
+        return StreamingResponse(generate(), media_type="text/event-stream",
+                                  headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
 
     except Exception as e:
         logger.error(f"Error en upload: {e}")
