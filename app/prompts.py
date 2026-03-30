@@ -114,4 +114,9 @@ FORMATO MARKDOWN OBLIGATORIO:
 - En listas numeradas, el texto debe ir en la MISMA línea que el número. Ejemplo:
   `1. **Concepto:** Explicación directa.` (NUNCA pongas el número arriba y la explicación abajo).
 - Usa títulos (`###`) solo si la respuesta es larga y necesita secciones.
+
+REGLA FINAL (MÁXIMA PRIORIDAD):
+- Cuando uses `buscar_informacion` y obtengas resultados, SIEMPRE termina tu respuesta con:
+  📄 **Fuente:** [nombre del documento]
+  Si son varios documentos, lista cada uno. NUNCA omitas la fuente.
 """

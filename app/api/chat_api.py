@@ -348,7 +348,11 @@ NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MA
                             "content": json.dumps({"success": False, "mensaje": "No hay imagen de cámara disponible. Asegúrate de que tu cámara esté encendida."})
                         })
                 else:
-                    result = execute_tool(tool_name, arguments, db_service, request.user_id, request.pilar_id)
+                    try:
+                        result = execute_tool(tool_name, arguments, db_service, request.user_id, request.pilar_id)
+                    except Exception as tool_err:
+                        logger.error(f"❌ Error ejecutando tool {tool_name}: {tool_err}")
+                        result = {"error": f"Error ejecutando {tool_name}: {str(tool_err)}"}
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -408,6 +412,7 @@ NOTA: Estás respondiendo en modo TEXTO (no voz). Sigue las reglas de FORMATO MA
             except Exception as e:
                 logger.error(f"Error en streaming: {e}")
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream",
                                   headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -566,7 +571,7 @@ async def upload_file(
             return StreamingResponse(generate_assistant(), media_type="text/event-stream")
 
         # --- FLUJO NORMAL (Sonora General - Chat Completions) ---
-        history = db_service.get_history()
+        history = db_service.get_conversation_history(conversation_id)
         messages = [{"role": "system", "content": get_system_prompt(pilar_id)}] + history + [{"role": "user", "content": openai_content}]
         
         # Llamada a OpenAI
