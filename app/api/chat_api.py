@@ -132,6 +132,22 @@ TOOLS = [
                 "required": ["tipo"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_metricas_tuguia",
+            "description": "Obtiene métricas básicas de la plataforma Tu Guía Argentina: total de perfiles, suscripciones activas/inactivas, cuentas personales/business, perfiles verificados, registros recientes (7d/30d), servicios publicados y distribución geográfica por provincias. Úsala SIEMPRE cuando pregunten por métricas, estadísticas, estado, crecimiento, altas, registros, nuevos usuarios, esta semana, últimos 7 días, últimos 30 días, verificados, suscripciones, servicios o provincias de Tu Guía.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_adheridos_tuguia",
+            "description": "Obtiene la cantidad de adheridos (miembros) de Tu Guía Argentina desglosados por rubro (subcategoría) y por provincia. Úsala cuando pregunten por adheridos, miembros, rubros, categorías de adheridos, o distribución geográfica de miembros en Tu Guía.",
+            "parameters": {"type": "object", "properties": {}}
+        }
     }
 ]
 
@@ -174,6 +190,16 @@ def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, u
         elif tool_name == "consultar_actividad":
             tipo = arguments.get("tipo", "resumen_general")
             result = db_service.get_activity_stats(tipo)
+            return result
+        
+        elif tool_name == "consultar_metricas_tuguia":
+            tuguia_db = TuGuiaDatabase()
+            result = tuguia_db.get_basic_metrics()
+            return result
+        
+        elif tool_name == "consultar_adheridos_tuguia":
+            tuguia_db = TuGuiaDatabase()
+            result = tuguia_db.get_adheridos_metrics()
             return result
         
         else:
