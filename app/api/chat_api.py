@@ -15,6 +15,7 @@ from loguru import logger
 from app.services.database import DatabaseService
 from app.services.rag import get_relevant_context
 from app.services.tuguia_database import TuGuiaDatabase
+from app.services.tribus_database import TribusDatabase
 from app.prompts import SYSTEM_PROMPT, get_system_prompt
 
 router = APIRouter()
@@ -148,6 +149,54 @@ TOOLS = [
             "description": "Obtiene la cantidad de adheridos (miembros) de Tu Guía Argentina desglosados por rubro (subcategoría) y por provincia. Úsala cuando pregunten por adheridos, miembros, rubros, categorías de adheridos, o distribución geográfica de miembros en Tu Guía.",
             "parameters": {"type": "object", "properties": {}}
         }
+    },
+    # ── Tools de la IA Jefa de Tribu (Pilar 3) ──
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_leads_marketplace",
+            "description": "Consulta los leads capturados desde Facebook Marketplace. Permite filtrar por rubro (ej: Peluquería, Carpintería), provincia (ej: Buenos Aires, Córdoba) y estado (nuevo, contactado, interesado, adherido, rechazado). Úsala cuando pregunten por leads, posibles clientes, cuántos comercios hay, o datos de Marketplace.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rubro": {"type": "string", "description": "Filtrar por rubro (ej: Peluquería, Carpintería, Plomería)"},
+                    "provincia": {"type": "string", "description": "Filtrar por provincia argentina (ej: Buenos Aires, Córdoba)"},
+                    "estado": {"type": "string", "enum": ["nuevo", "contactado", "interesado", "adherido", "rechazado"], "description": "Filtrar por estado del lead"}
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "medir_asesores_tribu",
+            "description": "Obtiene la lista y métricas de los asesores comerciales de la tribu. Muestra nombre, teléfono, tipo de cuenta y fecha de registro. Úsala cuando pregunten cuántos asesores hay, quiénes son, o necesiten organizar al equipo de ventas.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "asignar_leads_a_asesor",
+            "description": "Asigna un lote de leads de un rubro específico a un asesor comercial. Los leads pasan de estado 'nuevo' a 'contactado'. Úsala cuando pidan asignar leads, repartir clientes, o dar trabajo a un asesor.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rubro": {"type": "string", "description": "Rubro de los leads a asignar (ej: Peluquería)"},
+                    "asesor_nombre": {"type": "string", "description": "Nombre del asesor al que asignar los leads"},
+                    "cantidad": {"type": "integer", "description": "Cantidad de leads a asignar (default: 10)"}
+                },
+                "required": ["rubro", "asesor_nombre"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ver_resumen_zona",
+            "description": "Muestra un resumen completo de la zona de trabajo: total de leads por rubro, leads con y sin teléfono, estados de los leads, y cantidad de asesores disponibles. Úsala cuando pidan un panorama general, resumen de zona, o 'cómo estamos'.",
+            "parameters": {"type": "object", "properties": {}}
+        }
     }
 ]
 
@@ -202,6 +251,29 @@ def execute_tool(tool_name: str, arguments: dict, db_service: DatabaseService, u
             result = tuguia_db.get_adheridos_metrics()
             return result
         
+        # ── Tools de la IA Jefa de Tribu ──
+        elif tool_name == "consultar_leads_marketplace":
+            tribus_db = TribusDatabase()
+            rubro = arguments.get("rubro")
+            provincia = arguments.get("provincia")
+            estado = arguments.get("estado")
+            return tribus_db.consultar_leads(rubro=rubro, provincia=provincia, estado=estado)
+        
+        elif tool_name == "medir_asesores_tribu":
+            tribus_db = TribusDatabase()
+            return tribus_db.medir_asesores()
+        
+        elif tool_name == "asignar_leads_a_asesor":
+            tribus_db = TribusDatabase()
+            rubro = arguments.get("rubro", "")
+            asesor_nombre = arguments.get("asesor_nombre", "")
+            cantidad = arguments.get("cantidad", 10)
+            return tribus_db.asignar_leads(rubro=rubro, asesor_nombre=asesor_nombre, cantidad=cantidad)
+        
+        elif tool_name == "ver_resumen_zona":
+            tribus_db = TribusDatabase()
+            return tribus_db.ver_resumen_zona()
+        
         else:
             return {"success": False, "error": f"Tool '{tool_name}' no implementada"}
     
@@ -225,6 +297,8 @@ def get_user_memory(user_id: str, db_service: DatabaseService) -> str:
         return ""
     # memories es un diccionario {key: value}, iteramos sobre items()
     memory_text = "\n".join([f"- {key}: {value}" for key, value in memories.items()])
+    return f"\n\nMEMORIA DEL USUARIO:\n{memory_text}"
+
 def get_or_create_thread(conversation_id: str, db_service: DatabaseService) -> str:
     """Consulteer o crear un Thread de OpenAI asociado a una conversación específica."""
     response = db_service.client.table("conversations").select("metadata").eq("id", conversation_id).execute()
